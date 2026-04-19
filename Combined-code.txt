@@ -1,0 +1,1422 @@
+
+ -------------------- FaceDetection.js ------------------------ 
+
+// Handles Face Detection Logic
+class FaceDetection {
+  constructor() {}
+
+  // Detect & Draw Outline on our Face
+  faceDetect(faces, targetBuffer) {
+    for (let i = 0; i < faces.length; i++) {
+      let face = faces[i].faceOval; // Using faceOval keypoints
+
+      targetBuffer.push();
+      targetBuffer.noFill();
+      targetBuffer.stroke(0, 255, 0);
+      targetBuffer.strokeWeight(2);
+
+      targetBuffer.beginShape();
+      for (let j = 0; j < face.keypoints.length; j++) {
+        let keypoint = face.keypoints[j];
+
+        // Draw lines using vertex
+        targetBuffer.vertex(keypoint.x, keypoint.y);
+      }
+      targetBuffer.endShape(CLOSE);
+      targetBuffer.pop();
+    }
+  }
+
+  // Grayscale only the face
+  grayScaleFace(faces) {
+    let out = createImage(faces.width, faces.height);
+
+    faces.loadPixels();
+    out.loadPixels();
+
+    // Grayscale Algorithm
+    for (let i = 0; i < faces.width; i++) {
+      for (let j = 0; j < faces.height; j++) {
+        let index = (faces.width * j + i) * 4;
+
+        let r = faces.pixels[index + 0];
+        let g = faces.pixels[index + 1];
+        let b = faces.pixels[index + 2];
+
+        let avg = (r + g + b) / 3;
+
+        out.pixels[index + 0] = avg;
+        out.pixels[index + 1] = avg;
+        out.pixels[index + 2] = avg;
+        out.pixels[index + 3] = 255;
+      }
+    }
+
+    out.updatePixels();
+    return out;
+  }
+
+  // Mirror the face
+  flipFace(faces) {
+    let out = createImage(faces.width, faces.height);
+
+    faces.loadPixels();
+    out.loadPixels();
+
+    // Swap the left and right value for mirror effect
+    for (let i = 0; i < faces.height; i++) {
+      for (let j = 0; j < faces.width; j++) {
+        let index = (faces.width * i + j) * 4;
+        let endIndex = (i * faces.width + (faces.width - 1 - j)) * 4;
+
+        out.pixels[endIndex + 0] = faces.pixels[index + 0];
+        out.pixels[endIndex + 1] = faces.pixels[index + 1];
+        out.pixels[endIndex + 2] = faces.pixels[index + 2];
+        out.pixels[endIndex + 3] = faces.pixels[index + 3];
+      }
+    }
+
+    out.updatePixels();
+    return out;
+  }
+
+  // Blurred Face using 5x5 Pixel Blocks
+  pixelatedFace(faces, targetBuffer, posX, posY) {
+    let out = this.grayScaleFace(faces);
+
+    faces.loadPixels();
+    out.loadPixels();
+
+    let block = 5;
+
+    targetBuffer.push();
+    targetBuffer.noStroke();
+
+    // Calculate over the blocks
+    for (let i = 0; i < faces.width; i += block) {
+      for (let j = 0; j < faces.height; j += block) {
+        let total = 0;
+        let count = 0;
+
+        // Calculating the average intensity of each block's pixels
+        for (let x = 0; x < block; x++) {
+          for (let y = 0; y < block; y++) {
+            let pX = i + x;
+            let pY = j + y;
+
+            if (pX < faces.width && pY < faces.height) {
+              let index = (faces.width * pY + pX) * 4;
+
+              total += out.pixels[index];
+              count++;
+            }
+          }
+        }
+
+        // Calculate the average
+        let avg = total / count;
+
+        targetBuffer.fill(avg);
+        targetBuffer.ellipse(i + posX + block / 2, posY + j + block / 2, 8);
+      }
+    }
+
+    targetBuffer.pop();
+  }
+
+  // Detect if the user is smiling
+  checkSmile(faces) {
+    if (faces.length > 0) {
+      let keypoints = faces[0].keypoints;
+
+      // Calculate face width
+      let faceLeft = keypoints[234];
+      let faceRight = keypoints[454];
+      let faceWidth = dist(faceLeft.x, faceLeft.y, faceRight.x, faceRight.y);
+
+      // Mouth Corners
+      let leftMouth = keypoints[61];
+      let rightMouth = keypoints[291];
+
+      // Width of the Mouth
+      let mouthWidth = dist(
+        leftMouth.x,
+        leftMouth.y,
+        rightMouth.x,
+        rightMouth.y
+      );
+
+      // Smilling should be around 45-50% of face width
+      let smileThreshold = faceWidth * 0.45;
+
+      if (mouthWidth > smileThreshold) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+}
+
+ -------------------- Frame.js ------------------------ 
+
+// Frame Design & Camera / Image initialization
+class Frame {
+  constructor(x, y, image = null) {
+    this.x = x;
+    this.y = y;
+    this.image = image;
+  }
+
+  draw() {
+    if (this.image) {
+      push();
+
+      // Shadow Effect
+      fill(0, 0, 0, 50);
+      rect(this.x - 15, this.y - 10, 164, 124, 5);
+
+      // Frame Border
+      stroke("#6883BA");
+      strokeWeight(3);
+      fill("#1E1E2E");
+      rect(this.x - 2, this.y - 2, 164, 124, 2);
+      pop();
+      push();
+      image(this.image, this.x, this.y, 160, 120);
+      pop();
+    }
+  }
+
+  drawCamera(camera) {
+    push();
+    // Neon Glow for the active camera
+    noFill();
+    strokeWeight(4);
+    stroke(0, 255, 100, 150);
+    rect(this.x - 5, this.y - 5, 170, 130, 5);
+
+    // Draw the actual buffer
+    image(camera.buffer, this.x, this.y, 160, 120);
+
+    // Recording Circle
+    fill(255, 0, 0);
+    noStroke();
+    if (frameCount % 60 < 30) {
+      circle(this.x + 10, this.y + 10, 8);
+    }
+    pop();
+  }
+}
+
+ -------------------- HandDetection.js ------------------------ 
+
+// Hand Detection Logic Class
+
+class HandDetection {
+  // Hand Detection
+  handDetection(hands, targetBuffer) {
+    targetBuffer.push();
+    targetBuffer.noFill();
+    targetBuffer.stroke(255, 0, 255);
+    targetBuffer.strokeWeight(3);
+
+    // Get the keypoints of our hand
+    for (let i = 0; i < hands.length; i++) {
+      let hand = hands[i];
+      for (let j = 0; j < hand.keypoints.length; j++) {
+        let keypoint = hand.keypoints[j];
+
+        targetBuffer.point(keypoint.x, keypoint.y);
+      }
+    }
+
+    targetBuffer.pop();
+  }
+
+  // Check for Hand Gestures
+  checkGestures(hands) {
+    if (hands.length > 0) {
+      let hand = hands[0];
+      let keypoints = hand.keypoints;
+
+      //  Thumbs Up Gesture
+      let isThumbup =
+        keypoints[4].y < keypoints[3].y &&
+        keypoints[4].y < keypoints[2].y &&
+        keypoints[4].y < keypoints[8].y &&
+        keypoints[4].y < keypoints[12].y &&
+        keypoints[4].y < keypoints[16].y &&
+        keypoints[4].y < keypoints[20].y;
+
+      let fingerFolded =
+        keypoints[8].y > keypoints[6].y &&
+        keypoints[12].y > keypoints[10].y &&
+        keypoints[16].y > keypoints[14].y &&
+        keypoints[20].y > keypoints[18].y;
+
+      // Thumbs Up Detection
+      if (isThumbup & fingerFolded) {
+        return "thumbs_up";
+      }
+
+      // V pose gesture
+      let fingerUp =
+        keypoints[8].y < keypoints[6].y &&
+        keypoints[12].y < keypoints[10].y &&
+        keypoints[8].y < keypoints[16].y &&
+        keypoints[8].y < keypoints[20].y &&
+        keypoints[8].y < keypoints[4].y &&
+        keypoints[12].y < keypoints[16].y &&
+        keypoints[12].y < keypoints[20].y &&
+        keypoints[12].y < keypoints[4].y;
+
+      let otherFolded =
+        keypoints[16].y > keypoints[14].y && keypoints[20].y > keypoints[18].y;
+
+      if (fingerUp && otherFolded) {
+        return "v_pose";
+      }
+    }
+
+    return null;
+  }
+}
+
+ -------------------- ImageProcessor.js ------------------------ 
+
+// Image Filter Logic Class
+
+class ImageProcessor {
+  // Grayscale & -20% brightness
+  grayAndBright(image) {
+    let imgOut = createImage(image.width, image.height);
+
+    let brightness = 0.2;
+
+    imgOut.loadPixels();
+    image.loadPixels();
+
+    // Grayscale Algorithm
+    for (let i = 0; i < image.width; i++) {
+      for (let j = 0; j < image.height; j++) {
+        // Getting the index of each pixel
+        let index = (image.width * j + i) * 4;
+
+        let r = image.pixels[index + 0];
+        let g = image.pixels[index + 1];
+        let b = image.pixels[index + 2];
+
+        let gray = r * 0.299 + g * 0.587 + b * 0.114;
+
+        // To have value between 0-255
+        gray = max(gray - 255 * brightness, 0);
+
+        imgOut.pixels[index + 0] = gray;
+        imgOut.pixels[index + 1] = gray;
+        imgOut.pixels[index + 2] = gray;
+        imgOut.pixels[index + 3] = 255;
+      }
+    }
+
+    imgOut.updatePixels();
+
+    return imgOut;
+  }
+
+  // Color Channel (Red, Green, Blue)
+  colorChannel(image, color) {
+    let imgOut = createImage(image.width, image.height);
+
+    imgOut.loadPixels();
+    image.loadPixels();
+
+    for (let i = 0; i < image.width; i++) {
+      for (let j = 0; j < image.height; j++) {
+        let index = (image.width * j + i) * 4;
+
+        let r = image.pixels[index + 0];
+        let g = image.pixels[index + 1];
+        let b = image.pixels[index + 2];
+
+        // Checking for the channel
+        imgOut.pixels[index + 0] = color == "red" ? r : 0;
+        imgOut.pixels[index + 1] = color == "green" ? g : 0;
+        imgOut.pixels[index + 2] = color == "blue" ? b : 0;
+        imgOut.pixels[index + 3] = 255;
+      }
+    }
+
+    imgOut.updatePixels();
+
+    return imgOut;
+  }
+
+  // Color Channel with Threshold
+  colorChannelThreshold(image, color, threshold) {
+    let imgOut = createImage(image.width, image.height);
+
+    imgOut.loadPixels();
+    image.loadPixels();
+
+    for (let i = 0; i < image.width; i++) {
+      for (let j = 0; j < image.height; j++) {
+        let index = (image.width * j + i) * 4;
+
+        let r = image.pixels[index + 0];
+        let g = image.pixels[index + 1];
+        let b = image.pixels[index + 2];
+
+        // Determine the color of the channel
+        let currentColor;
+
+        if (color === "red") {
+          currentColor = r;
+        } else if (color === "green") {
+          currentColor = g;
+        } else {
+          currentColor = b;
+        }
+
+        if (currentColor > threshold) currentColor = 255;
+        else currentColor = 0;
+
+        imgOut.pixels[index + 0] = color == "red" ? currentColor : 0;
+        imgOut.pixels[index + 1] = color == "green" ? currentColor : 0;
+        imgOut.pixels[index + 2] = color == "blue" ? currentColor : 0;
+        imgOut.pixels[index + 3] = 255;
+      }
+    }
+
+    imgOut.updatePixels();
+
+    return imgOut;
+  }
+
+  // Color Space Algorithm I -> l*u*v Filter
+  luvFilter(image) {
+    let imgOut = createImage(image.width, image.height);
+
+    imgOut.loadPixels();
+    image.loadPixels();
+
+    for (let i = 0; i < image.width; i++) {
+      for (let j = 0; j < image.height; j++) {
+        let index = (image.width * j + i) * 4;
+
+        // Normalization
+        let r = image.pixels[index + 0] / 255;
+        let g = image.pixels[index + 1] / 255;
+        let b = image.pixels[index + 2] / 255;
+
+        // Convert to XYZ Format
+        let x = 0.4124564 * r + 0.3575761 * g + 0.1804375 * b;
+        let y = 0.2126729 * r + 0.7151522 * g + 0.072175 * b;
+        let z = 0.0193339 * r + 0.119192 * g + 0.9503041 * b;
+
+        // Reference white point constants (D65 illuminant)
+        let xN = 0.95047;
+        let yN = 1.0;
+        let zN = 1.08883;
+
+        // Compute Chromaticity coordinates (u', v')
+        let u = (4 * x) / (x + 15 * y + 3 * z);
+        let v = (9 * y) / (x + 15 * y + 3 * z);
+
+        // Calculate chromaticity for the reference white point
+        let uN = (4 * xN) / (xN + 15 * yN + 3 * zN);
+        let vN = (9 * yN) / (xN + 15 * yN + 3 * zN);
+
+        let yNew = y / yN;
+
+        let l;
+
+        // Compute L* (lightness) & check for non-linear behaviour
+        if (yNew > 0.008856) {
+          l = 116 * Math.pow(yNew, 1 / 3) - 16;
+        } else {
+          l = 903.3 * yNew;
+        }
+
+        // Compute u* & v* chromaticity coordinates
+        let uNew = 13 * l * (u - uN);
+        let vNew = 13 * l * (v - vN);
+
+        // Mapped to 0-255 for display purposes since it requires in RGB format
+        imgOut.pixels[index + 0] = map(l, 0, 100, 0, 255);
+        imgOut.pixels[index + 1] = map(uNew, -134, 220, 0, 255);
+        imgOut.pixels[index + 2] = map(vNew, -140, 122, 0, 255);
+        imgOut.pixels[index + 3] = 255;
+      }
+    }
+
+    imgOut.updatePixels();
+
+    return imgOut;
+  }
+
+  // Color Space Conversion Algorithm II -> l*a*b
+  labFilter(image) {
+    let imgOut = createImage(image.width, image.height);
+
+    imgOut.loadPixels();
+    image.loadPixels();
+
+    for (let i = 0; i < image.width; i++) {
+      for (let j = 0; j < image.height; j++) {
+        let index = (image.width * j + i) * 4;
+
+        // Normalization
+        let r = image.pixels[index + 0] / 255;
+        let g = image.pixels[index + 1] / 255;
+        let b = image.pixels[index + 2] / 255;
+
+        // Convert to XYZ Format
+        let x = 0.4124564 * r + 0.3575761 * g + 0.1804375 * b;
+        let y = 0.2126729 * r + 0.7151522 * g + 0.072175 * b;
+        let z = 0.0193339 * r + 0.119192 * g + 0.9503041 * b;
+
+        // Normalize XYZ with reference white points (D65 illuminant)
+        let xN = x / 0.95047;
+        let yN = y / 1.0;
+        let zN = z / 1.08883;
+
+        let l;
+
+        // Compute L* using fLab to handle cube roots
+        if (yN > 0.008856) {
+          l = 116 * this.fLab(yN) - 16;
+        } else {
+          l = 903.3 * this.fLab(yN);
+        }
+
+        // Compute a* (green - red) & b* (blue-yellow) axes
+        let aNew = 500 * (this.fLab(xN) - this.fLab(yN));
+        let bNew = 200 * (this.fLab(yN) - this.fLab(zN));
+
+        imgOut.pixels[index + 0] = map(l, 0, 100, 0, 255);
+        imgOut.pixels[index + 1] = map(aNew, -128, 127, 0, 255);
+        imgOut.pixels[index + 2] = map(bNew, -128, 127, 0, 255);
+        imgOut.pixels[index + 3] = 255;
+      }
+    }
+
+    imgOut.updatePixels();
+
+    return imgOut;
+  }
+
+  luvFilterThreshold(image, slider) {
+    let imgOut = createImage(image.width, image.height);
+
+    imgOut.loadPixels();
+    image.loadPixels();
+
+    for (let i = 0; i < image.width; i++) {
+      for (let j = 0; j < image.height; j++) {
+        let index = (image.width * j + i) * 4;
+
+        // Normalization
+        let r = image.pixels[index + 0] / 255;
+        let g = image.pixels[index + 1] / 255;
+        let b = image.pixels[index + 2] / 255;
+
+        // Convert to XYZ Format
+        let x = 0.4124564 * r + 0.3575761 * g + 0.1804375 * b;
+        let y = 0.2126729 * r + 0.7151522 * g + 0.072175 * b;
+        let z = 0.0193339 * r + 0.119192 * g + 0.9503041 * b;
+
+        // Reference white point constants (D65 illuminant)
+        let xN = 0.95047;
+        let yN = 1.0;
+        let zN = 1.08883;
+
+        // Calculate Chromaticity coordinates (u', v')
+        let u = (4 * x) / (x + 15 * y + 3 * z);
+        let v = (9 * y) / (x + 15 * y + 3 * z);
+
+        // Calculate Chromaticity for reference white points
+        let uN = (4 * xN) / (xN + 15 * yN + 3 * zN);
+        let vN = (9 * yN) / (xN + 15 * yN + 3 * zN);
+
+        let yNew = y / yN;
+
+        let l;
+
+        // Compute L* & check for non-linear behaviour
+        if (yNew > 0.008856) {
+          l = 116 * Math.pow(yNew, 1 / 3) - 16;
+        } else {
+          l = 903.3 * yNew;
+        }
+
+        // Compute u* & v* chromaticity
+        let uNew = 13 * l * (u - uN);
+        let vNew = 13 * l * (v - vN);
+
+        // Threshold for lightness
+        if (l > slider) {
+          l = 100;
+        } else {
+          l = 0;
+        }
+
+        imgOut.pixels[index + 0] = map(l, 0, 100, 0, 255);
+        imgOut.pixels[index + 1] = map(uNew, -134, 220, 0, 255);
+        imgOut.pixels[index + 2] = map(vNew, -140, 122, 0, 255);
+        imgOut.pixels[index + 3] = 255;
+      }
+    }
+
+    imgOut.updatePixels();
+
+    return imgOut;
+  }
+
+  labFilterThreshold(image, slider) {
+    let imgOut = createImage(image.width, image.height);
+
+    imgOut.loadPixels();
+    image.loadPixels();
+
+    for (let i = 0; i < image.width; i++) {
+      for (let j = 0; j < image.height; j++) {
+        let index = (image.width * j + i) * 4;
+
+        // Normalization
+        let r = image.pixels[index + 0] / 255;
+        let g = image.pixels[index + 1] / 255;
+        let b = image.pixels[index + 2] / 255;
+
+        // Convert to XYZ Format
+        let x = 0.4124564 * r + 0.3575761 * g + 0.1804375 * b;
+        let y = 0.2126729 * r + 0.7151522 * g + 0.072175 * b;
+        let z = 0.0193339 * r + 0.119192 * g + 0.9503041 * b;
+
+        // Normalize using white points reference
+        let xN = x / 0.95047;
+        let yN = y / 1.0;
+        let zN = z / 1.08883;
+
+        let l;
+
+        // Compute L* using fLab to handle cube roots
+        if (yN > 0.008856) {
+          l = 116 * this.fLab(yN) - 16;
+        } else {
+          l = 903.3 * this.fLab(yN);
+        }
+
+        // Compute a* (green - red) & b* (blue-yellow) axes
+        let aNew = 500 * (this.fLab(xN) - this.fLab(yN));
+        let bNew = 200 * (this.fLab(yN) - this.fLab(zN));
+
+        if (l > slider) {
+          l = 100;
+        } else {
+          l = 0;
+        }
+
+        imgOut.pixels[index + 0] = map(l, 0, 100, 0, 255);
+        imgOut.pixels[index + 1] = map(aNew, -128, 127, 0, 255);
+        imgOut.pixels[index + 2] = map(bNew, -128, 127, 0, 255);
+        imgOut.pixels[index + 3] = 255;
+      }
+    }
+
+    imgOut.updatePixels();
+
+    return imgOut;
+  }
+
+  // Handle non-linear math
+  fLab(t) {
+    if (t > 0.008856) {
+      return Math.pow(t, 1 / 3);
+    } else {
+      return 7.787 * t + 16 / 116;
+    }
+  }
+}
+
+ -------------------- PhotoApp.js ------------------------ 
+
+// Handles the Photo App Application
+class PhotoApp {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+
+    // Photo Group
+    this.group = null;
+
+    // Set the webcam
+    this.camera = new WebCam(160, 120);
+
+    this.snapTaken = false;
+
+    // Set The Ascii Filter (Extension)
+    this.asciiVideo = new AsciiVideo();
+
+    // Set the User Interface
+    this.ui = new UserInterface();
+
+    // Get the last saved filter
+    let savedFilter = localStorage.getItem("activeFilter") || "normal";
+
+    if (savedFilter) {
+      this.camera.currentFilter = savedFilter;
+    }
+
+    // Load Saved Photo Frames from Local Storage
+    if (localStorage.getItem("snapshot")) {
+      loadImage(localStorage.getItem("snapshot"), (img) => {
+        this.snapShot = img;
+        this.snapTaken = true;
+        this.group = new PhotoGroup(this.x + 550, this.y + 50, 5, 3, img);
+        this.group.setup(this.ui);
+        this.group.frames[12].image = this.camera.faceBuffer;
+      });
+    }
+  }
+
+  setup() {
+    // Initialize the camera
+    this.camera.initializeCam();
+
+    // Initialize user interface
+    this.ui.setup(this);
+
+    // Add the frame
+    this.cameraFrame = new Frame(this.x + 50, this.y + 50);
+
+    // Ascii Video Setup
+    this.asciiVideo.asciiSetup();
+  }
+
+  draw() {
+    // Draw Snap Button
+    this.ui.drawSnapButton(this.x, this.y);
+    this.ui.drawInstructions();
+
+    // Draw Web Cam Frame
+    this.cameraFrame.draw();
+
+    // Set The Webcam
+    this.cameraFrame.drawCamera(this.camera);
+
+    // Detects Face from Webcam
+    this.camera.detection();
+
+    // If press snap button
+    if (this.snapTaken && this.group) {
+      this.group.draw();
+      this.ui.drawFrameLabels(this.group.frames);
+      this.ui.drawSliderValues(this.group.frames);
+      this.group.frames[12].image = this.camera.faceBuffer;
+    }
+
+    // ASCII Camera Art
+    this.asciiVideo.asciiDetect(this.camera.camera);
+
+    // Detect Gesture & Smile for automatic snap
+    if (this.camera.detectGesture() && this.camera.detectSmile()) {
+      let currentTime = millis();
+
+      // 2 secons delay after automatic snap
+      if (currentTime - this.camera.lastSnap > this.camera.snapStime) {
+        this.takeSnap(true);
+        this.camera.lastSnap = currentTime; // Update the last snap time
+      }
+    }
+
+    // Perform auto snap flash
+    this.ui.autoSnapFlash();
+  }
+
+  // Capture Snap
+  takeSnap(auto = false) {
+    if (
+      (mouseX > this.x + 28 &&
+        mouseX < this.x + 128 &&
+        mouseY > this.y + 200 &&
+        mouseY < this.y + 230) ||
+      auto
+    ) {
+      this.snapTaken = true;
+
+      // Set the opacity and timer for the flash
+      if (auto) {
+        this.ui.flashAlpha = 500;
+      }
+
+      // Snap a Picture
+      this.camera.capturePicture();
+
+      // Get the snapshot image
+      this.snapShot = this.camera.snapshot;
+
+      // Convert to url so that it can be saved in the local storage
+      let tempCanvas = document.createElement("canvas");
+      tempCanvas.width = this.snapShot.width;
+      tempCanvas.height = this.snapShot.height;
+
+      let ctx = tempCanvas.getContext("2d");
+      ctx.drawImage(this.snapShot.canvas, 0, 0);
+
+      let dataURL = tempCanvas.toDataURL("image/png");
+
+      // Save to local storage
+      localStorage.setItem("snapshot", dataURL);
+
+      // Set a new PhotoGroup
+      this.ui.setup(this);
+
+      // Create a new PhotoGroup
+      this.group = new PhotoGroup(
+        this.x + 550,
+        this.y + 50,
+        5,
+        3,
+        this.snapShot
+      );
+      this.group.setup(this.ui);
+
+      // Set Webcam for frame 12
+      this.group.frames[12].image = this.camera.faceBuffer;
+    }
+  }
+
+  // Different Face Detection Filters
+  processFaceKey() {
+    let filter = "";
+
+    if (key === "1") {
+      filter = "grayscale";
+    } else if (key === "2") {
+      filter = "flip";
+    } else if (key === "3") {
+      filter = "pixelated";
+    } else if (key === "0") {
+      filter = "normal";
+    }
+
+    // Sync The Dropdown with Current Filter
+    if (filter !== "") {
+      this.camera.setCurrentFilter(filter);
+      this.ui.filterSelect.selected(filter);
+    }
+  }
+}
+
+ -------------------- PhotoGroup.js ------------------------ 
+
+// Handles the Photo Group grid (14 frames)
+
+class PhotoGroup {
+  constructor(x, y, row, col, image) {
+    this.x = x;
+    this.y = y;
+    this.row = row;
+    this.col = col;
+
+    this.ui;
+
+    this.image = image;
+
+    // Get the image filters
+    this.filter = new ImageProcessor();
+
+    // Store all frames
+    this.frames = [];
+  }
+
+  setup(ui) {
+    this.ui = ui;
+
+    // Initialize the frames
+    for (let i = 0; i < this.row; i++) {
+      for (let j = 0; j < this.col; j++) {
+        let cell = new Frame(this.x + j * 250, this.y + i * 200, this.image);
+
+        this.frames.push(cell);
+      }
+    }
+
+    console.log(ui);
+
+    // Set the sliders for threshold channels
+    this.ui.redSlider.position(this.frames[6].x, this.frames[6].y + 135);
+    this.ui.greenSlider.position(this.frames[7].x, this.frames[7].y + 135);
+    this.ui.blueSlider.position(this.frames[8].x, this.frames[8].y + 135);
+
+    this.ui.luvSlider.position(this.frames[13].x, this.frames[13].y + 135);
+    this.ui.labSlider.position(this.frames[14].x, this.frames[14].y + 135);
+  }
+
+  draw() {
+    // Set the filter for each frame
+    this.frames[1].image = this.filter.grayAndBright(this.image);
+
+    this.frames[2].image = null;
+
+    this.frames[3].image = this.filter.colorChannel(this.image, "red");
+    this.frames[4].image = this.filter.colorChannel(this.image, "green");
+    this.frames[5].image = this.filter.colorChannel(this.image, "blue");
+
+    this.frames[6].image = this.filter.colorChannelThreshold(
+      this.image,
+      "red",
+      this.ui.redSlider.value()
+    );
+
+    this.frames[7].image = this.filter.colorChannelThreshold(
+      this.image,
+      "green",
+      this.ui.greenSlider.value()
+    );
+
+    this.frames[8].image = this.filter.colorChannelThreshold(
+      this.image,
+      "blue",
+      this.ui.blueSlider.value()
+    );
+
+    this.frames[10].image = this.filter.luvFilter(this.image);
+    this.frames[11].image = this.filter.labFilter(this.image);
+
+    this.frames[13].image = this.filter.luvFilterThreshold(
+      this.image,
+      this.ui.luvSlider.value()
+    );
+
+    this.frames[14].image = this.filter.labFilterThreshold(
+      this.image,
+      this.ui.labSlider.value()
+    );
+
+    // Draw every frame
+    for (let i = 0; i < this.frames.length; i++) {
+      this.frames[i].draw();
+    }
+  }
+}
+
+ -------------------- sketch.js ------------------------ 
+
+let photoApp;
+let faceMesh;
+let handPose;
+
+function preload() {
+  let options = {
+    maxFaces: 1,
+    refineLandmarks: false,
+    flipHorizontal: false,
+  };
+
+  // Set the face & hand detection
+  faceMesh = ml5.faceMesh(options);
+  handPose = ml5.handPose();
+}
+
+function setup() {
+  createCanvas(windowWidth, 1500);
+  pixelDensity(1);
+  background(0);
+
+  photoApp = new PhotoApp(50, 50);
+  photoApp.setup();
+}
+
+function draw() {
+  background("#3D3B8E");
+
+  // Draw the photo app
+  photoApp.draw();
+}
+
+function mousePressed() {
+  // Take Snap Logic
+  photoApp.takeSnap(false);
+}
+
+function keyPressed() {
+  if (key == "s") {
+    photoApp.takeSnap(true);
+  }
+
+  // Apply filters using keys (0,1,2,3)
+  photoApp.processFaceKey();
+}
+
+// COMMENTARY
+/**
+ * App Walkthrough
+The PhotoApp that I developed is an interactive image processing application consisting of different filters, color space manipulation and face and hand detection. During initialization, the webcam is activated and when the snap button is clicked, it triggers the takeSnap() function. This generates a PhotoGroup class grid with 14 frames, each displaying different filters. 
+
+Each image  is processed using nested looping that manipulates pixel values directly through custom methods. Each color channel keeps one RGB component while setting the remaining to zero. Threshold filters apply maximum intensity when pixel values exceed a user-defined value.
+
+For color space conversion, I implemented Luv and Lab algorithm. First, RGB values are normalized and converted to the CIE XYZ, then adjusted against the D65 white points before applying the respective formulas. Threshold is also applied to selected components.
+
+For face detection, I used the ml5 library that provides facial keypoints for smooth performance. Effects are applied to a separate graphics buffer that updates every frame, acting as a webcam. The mirror effect swaps pixels horizontally, while the pixelation effect divides the pixels into 5x5 blocks and applies the average intensity within each block.
+
+Problems
+During color space conversion algorithms development, The documentation only provided partial mathematical formulas, making it difficult to directly translate them into code. This required extra research online to fully understand the complete steps. After several trials and debugging, I managed to achieve the accurate result.
+
+Another difficulty was designing an appropriate object-oriented structure. With multiple components, organizing responsibilities into classes was initially overwhelming. I experienced trials and errors, deciding where functions should be placed and how modules should interact. To resolve this, I outlined all components with their roles before structuring them.
+
+Progress
+I managed my time effectively by dividing tasks weekly. I allocated three days to research, develop and evaluate approximately three filters or functionalities. This allowed me to complete the requirements on schedule.
+
+Extension
+For my extension, I implemented two separate extensions which are an automatic snap system and an ASCII video filter. 
+
+The automatic snap feature uses real-time hand and face keypoints from the ml5 library. Gesture detection is implemented by comparing the fingertip keypoints and lower joints to determine whether fingers are extended or folded. For example, V-pose requires the index and middle finger to be extended. Smile detection calculates the ratio between mouth and face width, requiring it to exceed approximately 45% for proportional detection regardless of camera distance. The ASCII filter converts live webcam frames into text-based art by calculating pixel brightness and mapping it to a research density string from dark to light characters.
+
+Although visually simple, the development required significant research and experiments. I had to carefully analyze and compare different hand and facial keypoints to determine the most accurate conditions for detecting gestures and smiles which involved many trials. These extensions introduce intelligent behavioral interaction, allowing the system to respond dynamically to natural human actions while also adding a creative visual transformation, making the application more interactive and unique.
+
+ */
+
+
+ -------------------- UserInterface.js ------------------------ 
+
+// User Interface Logic
+class UserInterface {
+  constructor() {
+    this.redSlider;
+    this.greenSlider;
+    this.blueSlider;
+    this.luvSlider;
+    this.labSlider;
+
+    this.filterSelect;
+
+    this.flashAlpha = 0;
+
+    this.buffer3d;
+  }
+
+  setup(appInstance) {
+    this.colorChannelSlider();
+    this.colorSpaceSlider();
+
+    this.drawDropDown(appInstance);
+
+    this.buffer3d = createGraphics(windowWidth, windowHeight, WEBGL);
+  }
+
+  // Initialize the channel sliders
+  colorChannelSlider() {
+    this.redSlider = createSlider(0, 255, 0);
+    this.greenSlider = createSlider(0, 255, 0);
+    this.blueSlider = createSlider(0, 255, 0);
+  }
+
+  // Initialize the color space sliders
+  colorSpaceSlider() {
+    this.luvSlider = createSlider(0, 100, 50);
+    this.labSlider = createSlider(0, 100, 50);
+  }
+
+  // Draw Snap Button
+  drawSnapButton(x, y) {
+    // Button Shadow
+    fill(0, 50);
+    rect(x + 31, y + 203, 100, 40, 8);
+
+    // Button Hover Design
+    let isHovered =
+      mouseX > x + 40 &&
+      mouseX < x + 128 &&
+      mouseY > y + 200 &&
+      mouseY < y + 230;
+
+    if (isHovered) {
+      fill("#EF476F");
+      cursor("pointer");
+    } else {
+      fill("#06D6A0");
+      cursor("default");
+    }
+
+    // Button Design
+    push();
+    noStroke();
+    rect(x + 40, y + 200, 100, 40, 8);
+    fill(255);
+    textSize(18);
+    textStyle(BOLD);
+    text("Snap", x + 70, y + 228);
+    pop();
+  }
+
+  drawInstructions() {
+    push();
+    // Set text style
+    fill(255);
+    noStroke();
+    textSize(14);
+    textFont("Courier New");
+    textAlign(LEFT);
+
+    let startX = 80;
+    let startY = 350;
+
+    // Instruction Text
+    let instructions = [
+      "CONTROLS:",
+      "- Press 'S' to take a manual Snap",
+      "- Auto-Snap: Show Hand + Smile together",
+      "- Keys 1-3: Change Face Filters",
+      "- Key 0: Reset Face Filter",
+      "- ASCII Art (Below)",
+    ];
+
+    // Draw each line
+    for (let i = 0; i < instructions.length; i++) {
+      // Slight shadow
+      fill(0, 150);
+      text(instructions[i], startX + 1, startY + i * 20 + 1);
+
+      // Main text
+      fill(i === 0 ? "#FFD166" : 255);
+      text(instructions[i], startX, startY + i * 20);
+    }
+    pop();
+  }
+
+  // Draw the labels for each grid cell
+  drawFrameLabels(frames) {
+    push();
+    fill(255);
+    noStroke();
+    textSize(15);
+    textFont("Courier New");
+    textAlign(CENTER);
+
+    // Labels for each Filter
+    let labels = [
+      "Original Image",
+      "Grayscale & Brightness 20%",
+      "",
+      "Red Channel",
+      "Green Channel",
+      "Blue Channel",
+      "Red Threshold",
+      "Green Threshold",
+      "Blue Threshold",
+      "Original",
+      "LUV Filter",
+      "LAB Filter",
+      "Face Detections",
+      "LUV Threshold",
+      "LAB Threshold",
+    ];
+
+    // Draw the labels
+    for (let i = 0; i < frames.length; i++) {
+      push();
+      fill(0, 150);
+      text(labels[i], frames[i].x + 80, frames[i].y - 30);
+      fill("#FFD166");
+      text(labels[i], frames[i].x + 82, frames[i].y - 28);
+      pop();
+    }
+    pop();
+  }
+
+  // Set the position of each sliders respective of their frames
+  drawSliderValues(frames) {
+    // Draw current slider values next to the sliders
+    push();
+    fill(255);
+    textSize(15);
+    text(this.redSlider.value(), frames[6].x + 140, frames[6].y + 150);
+    text(this.greenSlider.value(), frames[7].x + 140, frames[7].y + 150);
+    text(this.blueSlider.value(), frames[8].x + 140, frames[8].y + 150);
+    text(this.luvSlider.value(), frames[13].x + 140, frames[13].y + 150);
+    text(this.labSlider.value(), frames[14].x + 140, frames[14].y + 150);
+    pop();
+  }
+
+  // Initialize and style the dropdown menu for video effects
+  drawDropDown(appInstance) {
+    this.filterSelect = createSelect();
+    this.filterSelect.position(600, 1030);
+
+    this.filterSelect.style("padding", "0.5rem");
+    this.filterSelect.style("width", "160px");
+    this.filterSelect.style("background-color", "#6883BA");
+    this.filterSelect.style("color", "#F9F9F9");
+
+    this.filterSelect.option("normal");
+    this.filterSelect.option("grayscale");
+    this.filterSelect.option("flip");
+    this.filterSelect.option("pixelated");
+
+    this.filterSelect.selected(
+      localStorage.getItem("activeFilter") || "normal"
+    );
+
+    // Handle the selection changes
+    this.filterSelect.changed(() => {
+      let selected = this.filterSelect.value();
+      appInstance.camera.setCurrentFilter(selected);
+    });
+  }
+
+  autoSnapFlash() {
+    if (this.flashAlpha > 0) {
+      // Flash Animation
+      push();
+      fill(255, this.flashAlpha);
+      noStroke();
+      rect(0, 0, width, height);
+      fill(0, this.flashAlpha);
+      textSize(40);
+      textAlign(CENTER);
+      text("SNAPPED!!", width / 2, height / 2 - 200);
+      pop();
+
+      // Fade out the flash
+      this.flashAlpha -= 10;
+    }
+  }
+}
+
+ -------------------- VideoAscii.js ------------------------ 
+
+class AsciiVideo {
+  constructor() {
+    this.asciiDiv;
+  }
+
+  // Set up the ASCII style
+  asciiSetup() {
+    this.asciiDiv = createDiv();
+
+    this.asciiDiv.style("font-family", "monospace");
+    this.asciiDiv.style("white-space", "pre");
+    this.asciiDiv.style("color", "white");
+    this.asciiDiv.style("background", "black");
+    this.asciiDiv.style("font-size", "12px");
+    this.asciiDiv.style("line-height", "6px");
+  }
+
+  // ASCII Drawing Logic
+  asciiDetect(video) {
+    // ASCII Text
+    push();
+    textSize(50);
+    text("ASCII Video Filter", 50, height - 100);
+    pop();
+
+    // Darker to Lighter from the left
+    const density = "Ñ@#W$9876543210?!abc;:+=-,._                          ";
+
+    video.loadPixels();
+
+    let image = "";
+
+    // The detail (The higher the step the higher the performance)
+    let step = 1;
+
+    for (let j = 0; j < video.height; j += step) {
+      for (let i = 0; i < video.width; i += step) {
+        let index = (i + j * video.width) * 4;
+
+        let r = video.pixels[index + 0];
+        let g = video.pixels[index + 1];
+        let b = video.pixels[index + 2];
+
+        // Calculate the average brightness for the pixel
+        let avg = (r + g + b) / 3;
+
+        // Map the brightness to the density
+        let len = density.length;
+        let charIndex = floor(map(avg, 0, 255, 0, len - 1));
+
+        let c = density.charAt(charIndex);
+
+        // Row by row addition
+        image += c;
+      }
+
+      image += "<br/>";
+    }
+
+    // Update the Div with the string
+    this.asciiDiv.html(image);
+  }
+}
+
+ -------------------- WebCam.js ------------------------ 
+
+class WebCam {
+  constructor(w, h) {
+    this.w = w;
+    this.h = h;
+    this.camera;
+    this.buffer;
+
+    // Store faces & hand keypoints
+    this.faces = [];
+    this.hands = [];
+
+    // Initialize face & hand detection
+    this.faceDetection = new FaceDetection();
+    this.handDetection = new HandDetection();
+
+    // Automatic Snap Delay
+    this.lastSnap = 0;
+    this.snapStime = 3000;
+
+    // Main Buffer
+    this.buffer = createGraphics(this.w, this.h);
+
+    // Face Buffer (only face)
+    this.faceBuffer = createGraphics(this.w, this.h);
+
+    // The current filter of the video
+    this.currentFilter = "normal";
+
+    this.snapshot;
+  }
+
+  initializeCam() {
+    this.camera = createCapture(VIDEO);
+    this.camera.size(this.w, this.h);
+    this.camera.hide();
+
+    // Perform the face & hand detection
+    faceMesh.detectStart(this.camera, (results) => {
+      this.gotFaces(results);
+    });
+
+    handPose.detectStart(this.camera, (results) => {
+      this.gotHands(results);
+    });
+
+    console.log("initialized");
+  }
+
+  // Capture the current camera state into p5.Image
+  capturePicture() {
+    this.buffer.image(this.camera, 0, 0, this.w, this.h);
+
+    // take the snapshot from the webcam
+    push();
+    this.snapshot = createImage(this.w, this.h);
+    this.snapshot.copy(this.buffer, 0, 0, this.w, this.h, 0, 0, this.w, this.h);
+    pop();
+  }
+
+  detection() {
+    // Refresh the buffer for each frame
+    this.buffer.clear();
+
+    // Draw the fresh camera to the buffer
+    this.buffer.image(this.camera, 0, 0, this.w, this.h);
+
+    // Draw the hand detection only on the original cam
+    if (this.hands.length > 0) {
+      this.handDetection.handDetection(this.hands, this.buffer);
+    }
+
+    // Create seperate faceBuffer
+    this.faceBuffer.clear();
+    this.faceBuffer.image(this.camera, 0, 0, this.w, this.h);
+
+    // Get the detected face image
+    let faceProcess = this.getFaceImage();
+
+    // Apply Filters based on user
+    if (faceProcess) {
+      if (this.currentFilter == "grayscale") {
+        this.getGrayScaleVideo(faceProcess);
+      } else if (this.currentFilter == "flip") {
+        this.getFlipVideo(faceProcess);
+      } else if (this.currentFilter == "pixelated") {
+        this.getPixelatedVideo(faceProcess);
+      } else if (this.currentFilter == "normal") {
+        this.faceDetection.faceDetect(this.faces, this.faceBuffer);
+      }
+    }
+  }
+
+  gotFaces(results) {
+    this.faces = results;
+    // console.log(this.faces);
+  }
+
+  gotHands(results) {
+    this.hands = results;
+  }
+
+  // Detect the face & capture the image (for the buffer)
+  getFaceImage() {
+    if (this.faces.length > 0) {
+      let faces = this.faces[0].faceOval.keypoints;
+
+      let minX = Math.min(...faces.map((p) => p.x));
+      let maxX = Math.max(...faces.map((p) => p.x));
+      let minY = Math.min(...faces.map((p) => p.y));
+      let maxY = Math.max(...faces.map((p) => p.y));
+
+      // Create the position of the image
+      let img = createImage(floor(maxX - minX), floor(maxY - minY));
+
+      img.copy(
+        this.camera,
+        minX,
+        minY,
+        img.width,
+        img.height,
+        0,
+        0,
+        img.width,
+        img.height
+      );
+
+      return { img: img, x: minX, y: minY };
+    }
+  }
+
+  getGrayScaleVideo(faceProcess) {
+    let grayFace = this.faceDetection.grayScaleFace(faceProcess.img);
+    this.faceBuffer.image(grayFace, faceProcess.x, faceProcess.y);
+  }
+
+  setCurrentFilter(filter) {
+    this.currentFilter = filter;
+
+    // Save into local storage
+    localStorage.setItem("activeFilter", filter);
+  }
+
+  getFlipVideo(faceProcess) {
+    // let flipVideo = this.faceDetection.flipFace(this.camera);
+    let flipVideo = this.faceDetection.flipFace(faceProcess.img);
+
+    // this.buffer.image(flipVideo, 0, 0, this.w, this.h);
+    this.faceBuffer.image(flipVideo, faceProcess.x, faceProcess.y);
+  }
+
+  getPixelatedVideo(faceProcess) {
+    this.faceDetection.pixelatedFace(
+      faceProcess.img,
+      this.faceBuffer,
+      faceProcess.x,
+      faceProcess.y
+    );
+  }
+
+  detectGesture() {
+    return this.handDetection.checkGestures(this.hands) ? true : false;
+  }
+
+  detectSmile() {
+    return this.faceDetection.checkSmile(this.faces) ? true : false;
+  }
+}
